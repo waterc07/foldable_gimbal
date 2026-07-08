@@ -54,6 +54,16 @@ SimplePID::PIDParam frictionPIDParam = {
 SimplePID leftFrictionPID(SimplePID::PID_POSITION, frictionPIDParam);
 SimplePID rightFrictionPID(SimplePID::PID_POSITION, frictionPIDParam);
 
+SimplePID::PIDParam feederPIDParam = {
+    FEEDER_KP,
+    FEEDER_KI,
+    FEEDER_KD,
+    FEEDER_OUT_LIMIT,
+    FEEDER_IOUT_LIMIT};
+
+SimplePID feederPID(SimplePID::PID_POSITION, feederPIDParam);
+fp32 feederBulletFrequencyHz = FEEDER_BULLET_FREQ_HZ;
+
 /******************************************************************************
  *                            Motors
  ******************************************************************************/
@@ -73,6 +83,7 @@ MotorDM4310 upperPitchMotor(UPPER_PITCH_DM4310_CAN_ID,
 
 MotorM3508 leftFrictionMotor(LEFT_FRICTION_M3508_ID, &leftFrictionPID);
 MotorM3508 rightFrictionMotor(RIGHT_FRICTION_M3508_ID, &rightFrictionPID);
+MotorM2006 feederMotor(FEEDER_M2006_ID, &feederPID, 0U, FEEDER_M2006_RATIO);
 
 /******************************************************************************
  *                            IMU
@@ -121,6 +132,7 @@ Gimbal gimbal(&lowerPitchMotor,
               &upperPitchMotor,
               &leftFrictionMotor,
               &rightFrictionMotor,
+              &feederMotor,
               &imu,
               gimbalImuControlConfig);
 

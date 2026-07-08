@@ -30,6 +30,7 @@ public:
     MotorDM4310 *m_upperPitchMotor;
     MotorM3508 *m_leftFrictionMotor;
     MotorM3508 *m_rightFrictionMotor;
+    MotorM2006 *m_feederMotor;
 
     BMI088 *m_imu;
     Vector3f m_eulerAngle;
@@ -41,6 +42,7 @@ public:
     fp32 m_upperPitchJointTargetAngle;
     fp32 m_pitchTargetAngle;
     bool m_frictionState;
+    bool m_feederState;
     bool m_isDeployPitchReady;
     DR16RemoteControl m_remoteControl;
     bool m_isInitComplete;
@@ -49,12 +51,14 @@ public:
     uint8_t m_usbTxBuf[m_usbTxBufSize]       = {};
     uint8_t m_usbTxSOF                       = 0x3A;
     uint8_t m_usbTxEOF                       = 0xAA;
+    uint8_t m_frictionFeederControlData[8]   = {};
 
 public:
     Gimbal(MotorDM4310 *lowerPitchMotor,
            MotorDM4310 *upperPitchMotor,
            MotorM3508 *leftFrictionMotor,
            MotorM3508 *rightFrictionMotor,
+           MotorM2006 *feederMotor,
            BMI088 *imu,
            ImuControlConfig imuControlConfig);
 
@@ -77,7 +81,9 @@ private:
     void deployPitchControl();
     void frictionControl();
     void transmitGimbalMotorData();
+    void mergeDjiMotorControlData(MotorM3508 *motor);
 
     inline void setPitchAngle(const fp32 &targetAngle);
+    inline fp32 feederTargetAngularVelocity() const;
     inline fp32 gravityCompensate(fp32 baseTorque, fp32 currentAngle, fp32 compensateCoeff);
 };

@@ -14,6 +14,7 @@
 #include "tsk_isr.hpp"
 #include "usbd_cdc_if.h"
 #include <math.h>
+#include <string.h>
 
 extern CascadePID::PIDParam lowerPitchOuterParam;
 extern CascadePID::PIDParam lowerPitchInnerParam;
@@ -21,6 +22,7 @@ extern CascadePID::PIDParam upperPitchOuterParam;
 extern CascadePID::PIDParam upperPitchInnerParam;
 extern CascadePID lowerPitchPID;
 extern CascadePID upperPitchPID;
+extern fp32 feederBulletFrequencyHz;
 
 static void applyPitchPidProfile()
 {
@@ -38,12 +40,14 @@ Gimbal::Gimbal(MotorDM4310 *lowerPitchMotor,
                MotorDM4310 *upperPitchMotor,
                MotorM3508 *leftFrictionMotor,
                MotorM3508 *rightFrictionMotor,
+               MotorM2006 *feederMotor,
                BMI088 *imu,
                ImuControlConfig imuControlConfig)
     : m_lowerPitchMotor(lowerPitchMotor),
       m_upperPitchMotor(upperPitchMotor),
       m_leftFrictionMotor(leftFrictionMotor),
       m_rightFrictionMotor(rightFrictionMotor),
+      m_feederMotor(feederMotor),
       m_imu(imu),
       m_imuControlConfig(imuControlConfig),
       m_gimbalMode(GIMBAL_NO_FORCE),
@@ -52,6 +56,7 @@ Gimbal::Gimbal(MotorDM4310 *lowerPitchMotor,
       m_upperPitchJointTargetAngle(0.0f),
       m_pitchTargetAngle(0.0f),
       m_frictionState(false),
+      m_feederState(false),
       m_isDeployPitchReady(false),
       m_remoteControl(DT7_STICK_DEAD_ZONE),
       m_isInitComplete(false)
@@ -102,6 +107,7 @@ uint8_t Gimbal::sendUsbData()
 
     m_usbTxBuf[txbufIndex++] = static_cast<uint8_t>(m_gimbalMode);
     m_usbTxBuf[txbufIndex++] = m_frictionState ? 1U : 0U;
+    m_usbTxBuf[txbufIndex++] = m_feederState ? 1U : 0U;
     m_usbTxBuf[txbufIndex++] = m_usbTxEOF;
 
     return CDC_Transmit_FS(m_usbTxBuf, static_cast<uint16_t>(txbufIndex));
@@ -123,6 +129,7 @@ void Gimbal::receiveGimbalMotorDataFromISR(const can_rx_message_t *rxMessage)
     if (m_upperPitchMotor->decodeCanRxMessageFromISR(rxMessage)) return;
     if (m_leftFrictionMotor->decodeCanRxMessageFromISR(rxMessage)) return;
     if (m_rightFrictionMotor->decodeCanRxMessageFromISR(rxMessage)) return;
+    if (m_feederMotor->decodeCanRxMessageFromISR(rxMessage)) return;
 }
 
 void Gimbal::receiveRemoteControlDataFromISR(const uint8_t *rxData)
@@ -136,6 +143,7 @@ void Gimbal::modeSelect()
     if (!m_remoteControl.isConnected()) {
         m_gimbalMode    = GIMBAL_NO_FORCE;
         m_frictionState = false;
+        m_feederState   = false;
         return;
     }
 
@@ -144,11 +152,13 @@ void Gimbal::modeSelect()
         case RemoteControl::SwitchStatus3Pos::SWITCH_DOWN:
             m_gimbalMode    = GIMBAL_NO_FORCE;
             m_frictionState = false;
+            m_feederState   = false;
             return;
 
         case RemoteControl::SwitchStatus3Pos::SWITCH_MIDDLE:
             m_gimbalMode    = FOLD_CONTROL;
             m_frictionState = false;
+            m_feederState   = false;
             return;
 
         case RemoteControl::SwitchStatus3Pos::SWITCH_UP:
@@ -158,6 +168,7 @@ void Gimbal::modeSelect()
         default:
             m_gimbalMode    = GIMBAL_NO_FORCE;
             m_frictionState = false;
+            m_feederState   = false;
             return;
     }
 
@@ -165,6 +176,9 @@ void Gimbal::modeSelect()
         RemoteControl::SwitchEvent3Pos::SWITCH_TOGGLE_MIDDLE_UP) {
         m_frictionState = !m_frictionState;
     }
+
+    m_feederState = m_frictionState &&
+                    m_remoteControl.getLeftSwitchStatus() == RemoteControl::SwitchStatus3Pos::SWITCH_DOWN;
 }
 
 void Gimbal::handleModeTransition()
@@ -292,11 +306,19 @@ void Gimbal::frictionControl()
     if (m_gimbalMode != DEPLOY_CONTROL || !m_frictionState) {
         m_leftFrictionMotor->openloopControl(0.0f);
         m_rightFrictionMotor->openloopControl(0.0f);
+        m_feederMotor->openloopControl(0.0f);
+        m_feederState = false;
         return;
     }
 
     m_leftFrictionMotor->angularVelocityClosedloopControl(FRICTION_TARGET_ANGULAR_VELOCITY);
     m_rightFrictionMotor->angularVelocityClosedloopControl(-FRICTION_TARGET_ANGULAR_VELOCITY);
+
+    if (m_feederState) {
+        m_feederMotor->angularVelocityClosedloopControl(feederTargetAngularVelocity());
+    } else {
+        m_feederMotor->openloopControl(0.0f);
+    }
 }
 
 void Gimbal::transmitGimbalMotorData()
@@ -307,9 +329,30 @@ void Gimbal::transmitGimbalMotorData()
     CAN_Send_Data(&PITCH_DM4310_CAN_HANDLE,
                   const_cast<CAN_TxHeaderTypeDef *>(m_upperPitchMotor->getMotorControlHeader()),
                   const_cast<uint8_t *>(m_upperPitchMotor->getMotorControlData()));
+    memset(m_frictionFeederControlData, 0, sizeof(m_frictionFeederControlData));
+    mergeDjiMotorControlData(m_leftFrictionMotor);
+    mergeDjiMotorControlData(m_rightFrictionMotor);
+    mergeDjiMotorControlData(m_feederMotor);
     CAN_Send_Data(&FRICTION_M3508_CAN_HANDLE,
                   const_cast<CAN_TxHeaderTypeDef *>(m_leftFrictionMotor->getMotorControlHeader()),
-                  const_cast<uint8_t *>(m_leftFrictionMotor->getMergedControlData(*m_rightFrictionMotor)));
+                  m_frictionFeederControlData);
+}
+
+void Gimbal::mergeDjiMotorControlData(MotorM3508 *motor)
+{
+    if (motor->getMotorControlMessageID() != m_leftFrictionMotor->getMotorControlMessageID()) {
+        return;
+    }
+
+    const uint8_t motorId = motor->getDjiMotorID();
+    if (motorId < 1U || motorId > 4U) {
+        return;
+    }
+
+    const uint8_t *motorData = motor->getMotorControlData();
+    const uint8_t offset     = static_cast<uint8_t>((motorId - 1U) * 2U);
+    m_frictionFeederControlData[offset]     = motorData[offset];
+    m_frictionFeederControlData[offset + 1] = motorData[offset + 1];
 }
 
 inline void Gimbal::setPitchAngle(const fp32 &targetAngle)
@@ -321,6 +364,11 @@ inline void Gimbal::setPitchAngle(const fp32 &targetAngle)
     } else {
         m_pitchTargetAngle = targetAngle;
     }
+}
+
+inline fp32 Gimbal::feederTargetAngularVelocity() const
+{
+    return FEEDER_TARGET_DIRECTION * 2.0f * MATH_PI * feederBulletFrequencyHz / FEEDER_BULLET_SLOT_COUNT;
 }
 
 inline fp32 Gimbal::gravityCompensate(fp32 baseTorque, fp32 currentAngle, fp32 compensateCoeff)

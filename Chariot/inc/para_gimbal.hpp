@@ -21,12 +21,15 @@
 // centralized so the bench can be corrected without touching control logic.
 #define LEFT_FRICTION_M3508_ID  1U
 #define RIGHT_FRICTION_M3508_ID 2U
+#define FEEDER_M2006_ID         3U
+#define FEEDER_M2006_RATIO      36.0f
 
 /******************************************************************************
  *                            Motor buses
  ******************************************************************************/
 #define PITCH_DM4310_CAN_HANDLE   hcan1
 #define FRICTION_M3508_CAN_HANDLE hcan1
+#define FEEDER_M2006_CAN_HANDLE   hcan1
 
 /******************************************************************************
  *                            Foldable pitch model
@@ -79,6 +82,15 @@
 #define FRICTION_OUT_LIMIT               16384.0f
 #define FRICTION_IOUT_LIMIT              2000.0f
 #define FRICTION_TARGET_ANGULAR_VELOCITY 390.0f
+
+#define FEEDER_KP                  700.0f
+#define FEEDER_KI                  0.2f
+#define FEEDER_KD                  0.0f
+#define FEEDER_OUT_LIMIT           10000.0f
+#define FEEDER_IOUT_LIMIT          2000.0f
+#define FEEDER_BULLET_SLOT_COUNT   8.0f
+#define FEEDER_BULLET_FREQ_HZ      8.0f
+#define FEEDER_TARGET_DIRECTION    1.0f
 
 /******************************************************************************
  *                            IMU parameters

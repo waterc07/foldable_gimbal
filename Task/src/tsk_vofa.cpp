@@ -17,6 +17,9 @@ extern CascadePID upperPitchPID;
 extern SimplePID::PIDParam frictionPIDParam;
 extern SimplePID leftFrictionPID;
 extern SimplePID rightFrictionPID;
+extern SimplePID::PIDParam feederPIDParam;
+extern SimplePID feederPID;
+extern fp32 feederBulletFrequencyHz;
 extern SimplePID::PIDParam imuTempPIDParam;
 extern SimplePID imuTempPID;
 extern Gimbal gimbal;
@@ -57,6 +60,11 @@ static void applyFrictionPidParam()
     rightFrictionPID.pidSetParam(frictionPIDParam);
     rightFrictionPID.pidClear();
     taskEXIT_CRITICAL_FROM_ISR(irqState);
+}
+
+static void applyFeederPidParam()
+{
+    applySimplePidParam(feederPID, feederPIDParam);
 }
 
 static void registerParameterListeners()
@@ -171,6 +179,32 @@ static void registerParameterListeners()
         applyFrictionPidParam();
     });
 
+    vofa.AddParameterListener("feeder_kp", [](fp32 *newValue) {
+        feederPIDParam.Kp = *newValue;
+        applyFeederPidParam();
+    });
+    vofa.AddParameterListener("feeder_ki", [](fp32 *newValue) {
+        feederPIDParam.Ki = *newValue;
+        applyFeederPidParam();
+    });
+    vofa.AddParameterListener("feeder_kd", [](fp32 *newValue) {
+        feederPIDParam.Kd = *newValue;
+        applyFeederPidParam();
+    });
+    vofa.AddParameterListener("feeder_out_limit", [](fp32 *newValue) {
+        feederPIDParam.outputLimit = *newValue;
+        applyFeederPidParam();
+    });
+    vofa.AddParameterListener("feeder_iout_limit", [](fp32 *newValue) {
+        feederPIDParam.intergralLimit = *newValue;
+        applyFeederPidParam();
+    });
+    vofa.AddParameterListener("feeder_bullet_freq_hz", [](fp32 *newValue) {
+        UBaseType_t irqState     = taskENTER_CRITICAL_FROM_ISR();
+        feederBulletFrequencyHz  = *newValue > 0.0f ? *newValue : 0.0f;
+        taskEXIT_CRITICAL_FROM_ISR(irqState);
+    });
+
     vofa.AddParameterListener("imu_temp_kp", [](fp32 *newValue) {
         imuTempPIDParam.Kp = *newValue;
         applySimplePidParam(imuTempPID, imuTempPIDParam);
@@ -202,6 +236,8 @@ static void writeGimbalWaveData()
     vofa.writeData(gimbal.m_upperPitchMotor->getCurrentAngularVelocity());
     vofa.writeData(gimbal.m_leftFrictionMotor->getCurrentAngularVelocity() * 60.0f / (2.0f * M_PI));
     vofa.writeData(gimbal.m_rightFrictionMotor->getCurrentAngularVelocity() * 60.0f / (2.0f * M_PI));
+    vofa.writeData(gimbal.m_feederMotor->getCurrentAngularVelocity() * 60.0f / (2.0f * M_PI));
+    vofa.writeData(feederBulletFrequencyHz);
 }
 
 extern "C" void vofa_task(void *argument)
