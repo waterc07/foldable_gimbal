@@ -15,19 +15,21 @@
 #include "usbd_cdc_if.h"
 #include <math.h>
 
-extern CascadePID::PIDParam pitchOuterParam;
-extern CascadePID::PIDParam pitchInnerParam;
+extern CascadePID::PIDParam lowerPitchOuterParam;
+extern CascadePID::PIDParam lowerPitchInnerParam;
+extern CascadePID::PIDParam upperPitchOuterParam;
+extern CascadePID::PIDParam upperPitchInnerParam;
 extern CascadePID lowerPitchPID;
 extern CascadePID upperPitchPID;
 
 static void applyPitchPidProfile()
 {
     taskENTER_CRITICAL();
-    lowerPitchPID.getOuterLoop().pidSetParam(pitchOuterParam);
-    lowerPitchPID.getInnerLoop().pidSetParam(pitchInnerParam);
+    lowerPitchPID.getOuterLoop().pidSetParam(lowerPitchOuterParam);
+    lowerPitchPID.getInnerLoop().pidSetParam(lowerPitchInnerParam);
     lowerPitchPID.cascadeClear();
-    upperPitchPID.getOuterLoop().pidSetParam(pitchOuterParam);
-    upperPitchPID.getInnerLoop().pidSetParam(pitchInnerParam);
+    upperPitchPID.getOuterLoop().pidSetParam(upperPitchOuterParam);
+    upperPitchPID.getInnerLoop().pidSetParam(upperPitchInnerParam);
     upperPitchPID.cascadeClear();
     taskEXIT_CRITICAL();
 }
@@ -46,8 +48,11 @@ Gimbal::Gimbal(MotorDM4310 *lowerPitchMotor,
       m_imuControlConfig(imuControlConfig),
       m_gimbalMode(GIMBAL_NO_FORCE),
       m_lastGimbalMode(GIMBAL_NO_FORCE),
+      m_lowerPitchJointTargetAngle(0.0f),
+      m_upperPitchJointTargetAngle(0.0f),
       m_pitchTargetAngle(0.0f),
       m_frictionState(false),
+      m_isDeployPitchReady(false),
       m_remoteControl(DT7_STICK_DEAD_ZONE),
       m_isInitComplete(false)
 {
@@ -76,7 +81,7 @@ void Gimbal::controlLoop()
 
 uint8_t Gimbal::sendUsbData()
 {
-    uint32_t txbufIndex = 0U;
+    uint32_t txbufIndex      = 0U;
     m_usbTxBuf[txbufIndex++] = m_usbTxSOF;
 
     const float pitchTarget = m_pitchTargetAngle;
@@ -135,13 +140,26 @@ void Gimbal::modeSelect()
     }
 
     RemoteControl::SwitchStatus3Pos rightSwitchStatus = m_remoteControl.getRightSwitchStatus();
-    if (rightSwitchStatus == RemoteControl::SwitchStatus3Pos::SWITCH_DOWN) {
-        m_gimbalMode    = GIMBAL_NO_FORCE;
-        m_frictionState = false;
-        return;
-    }
+    switch (rightSwitchStatus) {
+        case RemoteControl::SwitchStatus3Pos::SWITCH_DOWN:
+            m_gimbalMode    = GIMBAL_NO_FORCE;
+            m_frictionState = false;
+            return;
 
-    m_gimbalMode = MANUAL_CONTROL;
+        case RemoteControl::SwitchStatus3Pos::SWITCH_MIDDLE:
+            m_gimbalMode    = FOLD_CONTROL;
+            m_frictionState = false;
+            return;
+
+        case RemoteControl::SwitchStatus3Pos::SWITCH_UP:
+            m_gimbalMode = DEPLOY_CONTROL;
+            break;
+
+        default:
+            m_gimbalMode    = GIMBAL_NO_FORCE;
+            m_frictionState = false;
+            return;
+    }
 
     if (m_remoteControl.getLeftSwitchEvent() ==
         RemoteControl::SwitchEvent3Pos::SWITCH_TOGGLE_MIDDLE_UP) {
@@ -157,7 +175,11 @@ void Gimbal::handleModeTransition()
 
     applyPitchPidProfile();
 
-    if (m_gimbalMode == MANUAL_CONTROL) {
+    m_lowerPitchJointTargetAngle = m_lowerPitchMotor->getCurrentAngle();
+    m_upperPitchJointTargetAngle = m_upperPitchMotor->getCurrentAngle();
+    m_isDeployPitchReady         = false;
+
+    if (m_gimbalMode == DEPLOY_CONTROL) {
         setPitchAngle(m_eulerAngle.y);
     } else {
         m_pitchTargetAngle = m_eulerAngle.y;
@@ -168,7 +190,7 @@ void Gimbal::handleModeTransition()
 
 void Gimbal::targetOrientationPlan()
 {
-    if (m_gimbalMode != MANUAL_CONTROL) {
+    if (m_gimbalMode != DEPLOY_CONTROL || !m_isDeployPitchReady) {
         return;
     }
 
@@ -181,33 +203,93 @@ void Gimbal::pitchControl()
     switch (m_gimbalMode) {
         case GIMBAL_NO_FORCE:
             m_pitchTargetAngle = m_eulerAngle.y;
+            m_lowerPitchJointTargetAngle = m_lowerPitchMotor->getCurrentAngle();
+            m_upperPitchJointTargetAngle = m_upperPitchMotor->getCurrentAngle();
+            m_isDeployPitchReady = false;
             m_lowerPitchMotor->openloopControl(0.0f);
             m_upperPitchMotor->openloopControl(0.0f);
             break;
 
-        case MANUAL_CONTROL: {
-            fp32 fdbData[2] = {
-                GSRLMath::normalizeDeltaAngle(m_eulerAngle.y - m_pitchTargetAngle),
-                m_imu->getGyro().y};
-
-            fp32 lowerOutput = m_lowerPitchMotor->externalClosedloopControl(0.0f, fdbData, 2);
-            fp32 upperOutput = m_upperPitchMotor->externalClosedloopControl(0.0f, fdbData, 2);
-            lowerOutput      = gravityCompensate(lowerOutput, m_eulerAngle.y, PITCH_GRAVITY_COMPENSATE);
-            upperOutput      = gravityCompensate(upperOutput, m_eulerAngle.y, PITCH_GRAVITY_COMPENSATE);
-
-            m_lowerPitchMotor->openloopControl(lowerOutput * LOWER_PITCH_OUTPUT_POLARITY);
-            m_upperPitchMotor->openloopControl(upperOutput * UPPER_PITCH_OUTPUT_POLARITY);
+        case FOLD_CONTROL:
+            m_isDeployPitchReady = false;
+            planFoldJointTargets(LOWER_PITCH_FOLDED_ANGLE, UPPER_PITCH_FOLDED_ANGLE);
+            jointAngleControl(m_lowerPitchMotor, m_lowerPitchJointTargetAngle, LOWER_PITCH_OUTPUT_POLARITY);
+            jointAngleControl(m_upperPitchMotor, m_upperPitchJointTargetAngle, UPPER_PITCH_OUTPUT_POLARITY);
             break;
-        }
+
+        case DEPLOY_CONTROL:
+            planFoldJointTargets(LOWER_PITCH_DEPLOYED_ANGLE, UPPER_PITCH_DEPLOYED_ANGLE);
+            jointAngleControl(m_lowerPitchMotor, m_lowerPitchJointTargetAngle, LOWER_PITCH_OUTPUT_POLARITY);
+            if (m_isDeployPitchReady || isDeployReached()) {
+                if (!m_isDeployPitchReady) {
+                    m_isDeployPitchReady = true;
+                    setPitchAngle(m_eulerAngle.y);
+                }
+                deployPitchControl();
+            } else {
+                m_pitchTargetAngle = m_eulerAngle.y;
+                jointAngleControl(m_upperPitchMotor, m_upperPitchJointTargetAngle, UPPER_PITCH_OUTPUT_POLARITY);
+            }
+            break;
 
         default:
             break;
     }
 }
 
+void Gimbal::planFoldJointTargets(fp32 lowerFinalAngle, fp32 upperFinalAngle)
+{
+    m_lowerPitchJointTargetAngle = rampJointTarget(m_lowerPitchJointTargetAngle, lowerFinalAngle);
+    m_upperPitchJointTargetAngle = rampJointTarget(m_upperPitchJointTargetAngle, upperFinalAngle);
+}
+
+fp32 Gimbal::rampJointTarget(fp32 currentTarget, fp32 finalTarget) const
+{
+    const fp32 maxStep = FOLD_JOINT_RAMP_SPEED * 0.001f;
+    if (maxStep <= 0.0f) {
+        return finalTarget;
+    }
+
+    const fp32 delta = GSRLMath::normalizeDeltaAngle(finalTarget - currentTarget);
+    if (fabsf(delta) <= maxStep) {
+        return finalTarget;
+    }
+
+    return currentTarget + (delta > 0.0f ? maxStep : -maxStep);
+}
+
+bool Gimbal::isDeployReached() const
+{
+    const fp32 lowerError = GSRLMath::normalizeDeltaAngle(m_lowerPitchMotor->getCurrentAngle() - LOWER_PITCH_DEPLOYED_ANGLE);
+    const fp32 upperError = GSRLMath::normalizeDeltaAngle(m_upperPitchMotor->getCurrentAngle() - UPPER_PITCH_DEPLOYED_ANGLE);
+    return fabsf(lowerError) < FOLD_JOINT_ANGLE_TOLERANCE &&
+           fabsf(upperError) < FOLD_JOINT_ANGLE_TOLERANCE;
+}
+
+void Gimbal::jointAngleControl(MotorDM4310 *motor, fp32 targetAngle, fp32 outputPolarity)
+{
+    fp32 fdbData[2] = {
+        GSRLMath::normalizeDeltaAngle(motor->getCurrentAngle() - targetAngle),
+        motor->getCurrentAngularVelocity()};
+
+    fp32 output = motor->externalClosedloopControl(0.0f, fdbData, 2);
+    motor->openloopControl(output * outputPolarity);
+}
+
+void Gimbal::deployPitchControl()
+{
+    fp32 fdbData[2] = {
+        GSRLMath::normalizeDeltaAngle(m_eulerAngle.y - m_pitchTargetAngle),
+        m_imu->getGyro().y};
+
+    fp32 upperOutput = m_upperPitchMotor->externalClosedloopControl(0.0f, fdbData, 2);
+    upperOutput      = gravityCompensate(upperOutput, m_eulerAngle.y, PITCH_GRAVITY_COMPENSATE);
+    m_upperPitchMotor->openloopControl(upperOutput * UPPER_PITCH_OUTPUT_POLARITY);
+}
+
 void Gimbal::frictionControl()
 {
-    if (m_gimbalMode == GIMBAL_NO_FORCE || !m_frictionState) {
+    if (m_gimbalMode != DEPLOY_CONTROL || !m_frictionState) {
         m_leftFrictionMotor->openloopControl(0.0f);
         m_rightFrictionMotor->openloopControl(0.0f);
         return;

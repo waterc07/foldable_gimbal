@@ -22,7 +22,8 @@ public:
 
     enum GimbalMode : uint8_t {
         GIMBAL_NO_FORCE = 0,
-        MANUAL_CONTROL,
+        FOLD_CONTROL,
+        DEPLOY_CONTROL,
     };
 
     MotorDM4310 *m_lowerPitchMotor;
@@ -36,8 +37,11 @@ public:
 
     GimbalMode m_gimbalMode;
     GimbalMode m_lastGimbalMode;
+    fp32 m_lowerPitchJointTargetAngle;
+    fp32 m_upperPitchJointTargetAngle;
     fp32 m_pitchTargetAngle;
     bool m_frictionState;
+    bool m_isDeployPitchReady;
     DR16RemoteControl m_remoteControl;
     bool m_isInitComplete;
 
@@ -66,6 +70,11 @@ private:
     void handleModeTransition();
     void targetOrientationPlan();
     void pitchControl();
+    void planFoldJointTargets(fp32 lowerFinalAngle, fp32 upperFinalAngle);
+    fp32 rampJointTarget(fp32 currentTarget, fp32 finalTarget) const;
+    bool isDeployReached() const;
+    void jointAngleControl(MotorDM4310 *motor, fp32 targetAngle, fp32 outputPolarity);
+    void deployPitchControl();
     void frictionControl();
     void transmitGimbalMotorData();
 

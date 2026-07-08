@@ -48,7 +48,6 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
-    Chariot/src/crt_calibration_storage.cpp
     Chariot/src/crt_gimbal.cpp
     Chariot/src/crt_vofa.c
     Task/src/tsk_gimbal.cpp

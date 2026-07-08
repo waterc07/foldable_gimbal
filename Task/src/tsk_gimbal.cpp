@@ -11,24 +11,38 @@
 /******************************************************************************
  *                            PID
  ******************************************************************************/
-CascadePID::PIDParam pitchOuterParam = {
-    PITCH_OUTER_KP,
-    PITCH_OUTER_KI,
-    PITCH_OUTER_KD,
-    PITCH_OUTER_OUT_LIMIT,
-    PITCH_OUTER_IOUT_LIMIT};
+CascadePID::PIDParam lowerPitchOuterParam = {
+    LOWER_PITCH_OUTER_KP,
+    LOWER_PITCH_OUTER_KI,
+    LOWER_PITCH_OUTER_KD,
+    LOWER_PITCH_OUTER_OUT_LIMIT,
+    LOWER_PITCH_OUTER_IOUT_LIMIT};
 
-CascadePID::PIDParam pitchInnerParam = {
-    PITCH_INNER_KP,
-    PITCH_INNER_KI,
-    PITCH_INNER_KD,
-    PITCH_INNER_OUT_LIMIT,
-    PITCH_INNER_IOUT_LIMIT};
+CascadePID::PIDParam lowerPitchInnerParam = {
+    LOWER_PITCH_INNER_KP,
+    LOWER_PITCH_INNER_KI,
+    LOWER_PITCH_INNER_KD,
+    LOWER_PITCH_INNER_OUT_LIMIT,
+    LOWER_PITCH_INNER_IOUT_LIMIT};
 
-LowPassFilter<fp32> lowerPitchInnerLPF(PITCH_INNER_LOWPASS_FILTER);
-LowPassFilter<fp32> upperPitchInnerLPF(PITCH_INNER_LOWPASS_FILTER);
-CascadePID lowerPitchPID(pitchOuterParam, pitchInnerParam, nullptr, &lowerPitchInnerLPF);
-CascadePID upperPitchPID(pitchOuterParam, pitchInnerParam, nullptr, &upperPitchInnerLPF);
+CascadePID::PIDParam upperPitchOuterParam = {
+    UPPER_PITCH_OUTER_KP,
+    UPPER_PITCH_OUTER_KI,
+    UPPER_PITCH_OUTER_KD,
+    UPPER_PITCH_OUTER_OUT_LIMIT,
+    UPPER_PITCH_OUTER_IOUT_LIMIT};
+
+CascadePID::PIDParam upperPitchInnerParam = {
+    UPPER_PITCH_INNER_KP,
+    UPPER_PITCH_INNER_KI,
+    UPPER_PITCH_INNER_KD,
+    UPPER_PITCH_INNER_OUT_LIMIT,
+    UPPER_PITCH_INNER_IOUT_LIMIT};
+
+LowPassFilter<fp32> lowerPitchInnerLPF(LOWER_PITCH_INNER_LOWPASS_FILTER);
+LowPassFilter<fp32> upperPitchInnerLPF(UPPER_PITCH_INNER_LOWPASS_FILTER);
+CascadePID lowerPitchPID(lowerPitchOuterParam, lowerPitchInnerParam, nullptr, &lowerPitchInnerLPF);
+CascadePID upperPitchPID(upperPitchOuterParam, upperPitchInnerParam, nullptr, &upperPitchInnerLPF);
 
 SimplePID::PIDParam frictionPIDParam = {
     FRICTION_KP,
