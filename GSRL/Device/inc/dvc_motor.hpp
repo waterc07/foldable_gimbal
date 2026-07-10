@@ -123,6 +123,7 @@ protected:
 public:
     MotorGM6020(uint8_t dji6020MotorID, Controller *controller, uint16_t encoderOffset = 0);
     uint8_t getDjiMotorID() const;
+    MotorGM6020 operator+(const MotorGM6020 &otherMotor) const;
     const uint8_t *getMergedControlData(MotorGM6020 &otherMotor);
 
 protected:

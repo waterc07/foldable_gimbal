@@ -216,10 +216,10 @@ void Gimbal::pitchControl()
 {
     switch (m_gimbalMode) {
         case GIMBAL_NO_FORCE:
-            m_pitchTargetAngle = m_eulerAngle.y;
+            m_pitchTargetAngle           = m_eulerAngle.y;
             m_lowerPitchJointTargetAngle = m_lowerPitchMotor->getCurrentAngle();
             m_upperPitchJointTargetAngle = m_upperPitchMotor->getCurrentAngle();
-            m_isDeployPitchReady = false;
+            m_isDeployPitchReady         = false;
             m_lowerPitchMotor->openloopControl(0.0f);
             m_upperPitchMotor->openloopControl(0.0f);
             break;
@@ -303,7 +303,7 @@ void Gimbal::deployPitchControl()
 
 void Gimbal::frictionControl()
 {
-    if (m_gimbalMode != DEPLOY_CONTROL || !m_frictionState) {
+    if (m_gimbalMode != DEPLOY_CONTROL || !m_isDeployPitchReady || !m_frictionState) {
         m_leftFrictionMotor->openloopControl(0.0f);
         m_rightFrictionMotor->openloopControl(0.0f);
         m_feederMotor->openloopControl(0.0f);
@@ -311,8 +311,8 @@ void Gimbal::frictionControl()
         return;
     }
 
-    m_leftFrictionMotor->angularVelocityClosedloopControl(FRICTION_TARGET_ANGULAR_VELOCITY);
-    m_rightFrictionMotor->angularVelocityClosedloopControl(-FRICTION_TARGET_ANGULAR_VELOCITY);
+    m_leftFrictionMotor->angularVelocityClosedloopControl(-FRICTION_TARGET_ANGULAR_VELOCITY);
+    m_rightFrictionMotor->angularVelocityClosedloopControl(FRICTION_TARGET_ANGULAR_VELOCITY);
 
     if (m_feederState) {
         m_feederMotor->angularVelocityClosedloopControl(feederTargetAngularVelocity());
@@ -323,36 +323,34 @@ void Gimbal::frictionControl()
 
 void Gimbal::transmitGimbalMotorData()
 {
-    CAN_Send_Data(&PITCH_DM4310_CAN_HANDLE,
-                  const_cast<CAN_TxHeaderTypeDef *>(m_lowerPitchMotor->getMotorControlHeader()),
-                  const_cast<uint8_t *>(m_lowerPitchMotor->getMotorControlData()));
-    CAN_Send_Data(&PITCH_DM4310_CAN_HANDLE,
-                  const_cast<CAN_TxHeaderTypeDef *>(m_upperPitchMotor->getMotorControlHeader()),
-                  const_cast<uint8_t *>(m_upperPitchMotor->getMotorControlData()));
-    memset(m_frictionFeederControlData, 0, sizeof(m_frictionFeederControlData));
-    mergeDjiMotorControlData(m_leftFrictionMotor);
-    mergeDjiMotorControlData(m_rightFrictionMotor);
-    mergeDjiMotorControlData(m_feederMotor);
-    CAN_Send_Data(&FRICTION_M3508_CAN_HANDLE,
-                  const_cast<CAN_TxHeaderTypeDef *>(m_leftFrictionMotor->getMotorControlHeader()),
-                  m_frictionFeederControlData);
-}
+    static bool transmitUpperPitchThisCycle = false;
 
-void Gimbal::mergeDjiMotorControlData(MotorM3508 *motor)
-{
-    if (motor->getMotorControlMessageID() != m_leftFrictionMotor->getMotorControlMessageID()) {
-        return;
+    MotorGM6020 mergedDjiMotor           = *m_leftFrictionMotor + *m_rightFrictionMotor + *m_feederMotor;
+    const uint8_t *mergedDjiControlData  = mergedDjiMotor.getMotorControlData();
+    memcpy(m_frictionFeederControlData, mergedDjiControlData, sizeof(m_frictionFeederControlData));
+
+    m_lastDjiCanTxFreeLevelBefore        = HAL_CAN_GetTxMailboxesFreeLevel(&FRICTION_M3508_CAN_HANDLE);
+    const HAL_StatusTypeDef djiTxStatus  = CAN_Send_Data(&FRICTION_M3508_CAN_HANDLE,
+                                                         const_cast<CAN_TxHeaderTypeDef *>(m_leftFrictionMotor->getMotorControlHeader()),
+                                                         const_cast<uint8_t *>(mergedDjiControlData));
+    m_lastDjiCanTxFreeLevelAfter         = HAL_CAN_GetTxMailboxesFreeLevel(&FRICTION_M3508_CAN_HANDLE);
+    m_lastDjiCanError                    = HAL_CAN_GetError(&FRICTION_M3508_CAN_HANDLE);
+    m_lastDjiTxStdId                     = m_leftFrictionMotor->getMotorControlMessageID();
+    m_lastDjiCan200TxStatus              = static_cast<uint8_t>(djiTxStatus);
+    m_lastDjiCan1ffTxStatus              = 0xFEU;
+
+    if (transmitUpperPitchThisCycle) {
+        const HAL_StatusTypeDef txStatus = CAN_Send_Data(&PITCH_DM4310_CAN_HANDLE,
+                                                         const_cast<CAN_TxHeaderTypeDef *>(m_upperPitchMotor->getMotorControlHeader()),
+                                                         const_cast<uint8_t *>(m_upperPitchMotor->getMotorControlData()));
+        m_lastUpperDmTxStatus            = static_cast<uint8_t>(txStatus);
+    } else {
+        const HAL_StatusTypeDef txStatus = CAN_Send_Data(&PITCH_DM4310_CAN_HANDLE,
+                                                         const_cast<CAN_TxHeaderTypeDef *>(m_lowerPitchMotor->getMotorControlHeader()),
+                                                         const_cast<uint8_t *>(m_lowerPitchMotor->getMotorControlData()));
+        m_lastLowerDmTxStatus            = static_cast<uint8_t>(txStatus);
     }
-
-    const uint8_t motorId = motor->getDjiMotorID();
-    if (motorId < 1U || motorId > 4U) {
-        return;
-    }
-
-    const uint8_t *motorData = motor->getMotorControlData();
-    const uint8_t offset     = static_cast<uint8_t>((motorId - 1U) * 2U);
-    m_frictionFeederControlData[offset]     = motorData[offset];
-    m_frictionFeederControlData[offset + 1] = motorData[offset + 1];
+    transmitUpperPitchThisCycle = !transmitUpperPitchThisCycle;
 }
 
 inline void Gimbal::setPitchAngle(const fp32 &targetAngle)

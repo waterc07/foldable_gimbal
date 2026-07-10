@@ -511,8 +511,12 @@ void MotorGM6020::convertControllerOutputToMotorControlData()
  */
 bool MotorGM6020::decodeCanRxMessage(const can_rx_message_t &rxMessage)
 {
+    if (rxMessage.header.IDE != CAN_ID_STD || rxMessage.header.RTR != CAN_RTR_DATA || rxMessage.header.DLC != 8U) {
+        return false;
+    }
     if (rxMessage.header.StdId != m_motorFeedbackMessageID) return false;
 
+    memcpy(m_motorFeedbackData, rxMessage.data, sizeof(m_motorFeedbackData));
     m_encoderHistory[1]      = m_encoderHistory[0];
     m_encoderHistory[0]      = (uint16_t)((((rxMessage.data[0] << 8) | rxMessage.data[1]) - m_encoderOffset) & 0x1FFF);
     m_currentAngle           = (fp32)m_encoderHistory[0] * 2 * MATH_PI / 8192;
@@ -533,6 +537,29 @@ uint8_t MotorGM6020::getDjiMotorID() const
 }
 
 /**
+ * @brief 大疆电机加法运算符重载，用于合并CAN控制数据
+ * @param otherMotor 另一个同控制ID的大疆电机
+ */
+MotorGM6020 MotorGM6020::operator+(const MotorGM6020 &otherMotor) const
+{
+    if (m_motorControlMessageID != otherMotor.m_motorControlMessageID) {
+        return *this;
+    }
+
+    MotorGM6020 combineMotor = *this;
+    if (otherMotor.m_djiMotorID < 5) {
+        uint8_t offset                              = otherMotor.m_djiMotorID * 2 - 2;
+        combineMotor.m_motorControlData[offset]     = otherMotor.m_motorControlData[offset];
+        combineMotor.m_motorControlData[offset + 1] = otherMotor.m_motorControlData[offset + 1];
+    } else {
+        uint8_t offset                              = otherMotor.m_djiMotorID * 2 - 10;
+        combineMotor.m_motorControlData[offset]     = otherMotor.m_motorControlData[offset];
+        combineMotor.m_motorControlData[offset + 1] = otherMotor.m_motorControlData[offset + 1];
+    }
+    return combineMotor;
+}
+
+/**
  * @brief 合并两个同控制ID的大疆电机CAN控制数据, 同时触发双方掉线检测
  * @param otherMotor 另一个同控制ID的大疆电机
  * @return const uint8_t* 合并后的8字节CAN控制数据
@@ -548,7 +575,7 @@ const uint8_t *MotorGM6020::getMergedControlData(MotorGM6020 &otherMotor)
     }
 
     memcpy(m_mergedData, selfData, 8);
-    uint8_t offset             = (uint8_t)(((otherMotor.m_djiMotorID - 1) & 0x3) * 2);
+    uint8_t offset           = (uint8_t)(((otherMotor.m_djiMotorID - 1) & 0x3) * 2);
     m_mergedData[offset]     = otherData[offset];
     m_mergedData[offset + 1] = otherData[offset + 1];
     return m_mergedData;
@@ -731,8 +758,8 @@ MotorDMmulti::MotorDMmulti(uint8_t dmMotorID, Controller *controller, uint16_t e
  */
 void MotorDMmulti::convertControllerOutputToMotorControlData()
 {
-    int16_t giveControlValue = (int16_t)m_controllerOutput; // 控制电流标幺值
-    uint8_t offset           = (uint8_t)(((m_dmMotorID - 1) & 0x3) * 2);
+    int16_t giveControlValue       = (int16_t)m_controllerOutput; // 控制电流标幺值
+    uint8_t offset                 = (uint8_t)(((m_dmMotorID - 1) & 0x3) * 2);
     m_motorControlData[offset]     = (uint8_t)(giveControlValue & 0xFF);        // 低 8 位
     m_motorControlData[offset + 1] = (uint8_t)((giveControlValue >> 8) & 0xFF); // 高 8 位
 }
@@ -797,7 +824,7 @@ const uint8_t *MotorDMmulti::getMergedControlData(MotorDMmulti &otherMotor)
     }
 
     memcpy(m_mergedData, selfData, 8);
-    uint8_t offset             = (uint8_t)(((otherMotor.m_dmMotorID - 1) & 0x3) * 2);
+    uint8_t offset           = (uint8_t)(((otherMotor.m_dmMotorID - 1) & 0x3) * 2);
     m_mergedData[offset]     = otherData[offset];
     m_mergedData[offset + 1] = otherData[offset + 1];
     return m_mergedData;

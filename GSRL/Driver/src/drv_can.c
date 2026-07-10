@@ -104,7 +104,8 @@ void CAN_Init(CAN_HandleTypeDef *hcan, CAN_Call_Back rxCallbackFunction)
  */
 HAL_StatusTypeDef CAN_Send_Data(CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *pTxHeader, uint8_t *pTxData)
 {
-    return HAL_CAN_AddTxMessage(hcan, pTxHeader, pTxData, NULL);
+    uint32_t txMailbox = 0U;
+    return HAL_CAN_AddTxMessage(hcan, pTxHeader, pTxData, &txMailbox);
 }
 
 /**

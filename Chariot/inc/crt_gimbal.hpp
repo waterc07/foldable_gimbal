@@ -52,6 +52,14 @@ public:
     uint8_t m_usbTxSOF                       = 0x3A;
     uint8_t m_usbTxEOF                       = 0xAA;
     uint8_t m_frictionFeederControlData[8]   = {};
+    uint8_t m_lastDjiCan200TxStatus          = 0xFFU;
+    uint8_t m_lastDjiCan1ffTxStatus          = 0xFFU;
+    uint32_t m_lastDjiTxStdId                = 0U;
+    uint32_t m_lastDjiCanTxFreeLevelBefore   = 0U;
+    uint32_t m_lastDjiCanTxFreeLevelAfter    = 0U;
+    uint32_t m_lastDjiCanError               = 0U;
+    uint8_t m_lastLowerDmTxStatus            = 0xFFU;
+    uint8_t m_lastUpperDmTxStatus            = 0xFFU;
 
 public:
     Gimbal(MotorDM4310 *lowerPitchMotor,
@@ -81,7 +89,6 @@ private:
     void deployPitchControl();
     void frictionControl();
     void transmitGimbalMotorData();
-    void mergeDjiMotorControlData(MotorM3508 *motor);
 
     inline void setPitchAngle(const fp32 &targetAngle);
     inline fp32 feederTargetAngularVelocity() const;

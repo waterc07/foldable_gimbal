@@ -38,59 +38,59 @@
 #define UPPER_PITCH_OUTPUT_POLARITY 1.0f
 
 // Fill these four angles after mechanical calibration. Unit: rad.
-#define LOWER_PITCH_FOLDED_ANGLE   0.940f
-#define UPPER_PITCH_FOLDED_ANGLE   4.730f
+#define LOWER_PITCH_FOLDED_ANGLE   0.950f
+#define UPPER_PITCH_FOLDED_ANGLE   4.680f
 #define LOWER_PITCH_DEPLOYED_ANGLE 2.120f
 #define UPPER_PITCH_DEPLOYED_ANGLE 3.590f
-#define FOLD_JOINT_RAMP_SPEED      0.5f
+#define FOLD_JOINT_RAMP_SPEED      2.0f
 #define FOLD_JOINT_ANGLE_TOLERANCE 0.1f
 
-#define PITCH_TARGET_UPPER_LIMIT   1.2f
-#define PITCH_TARGET_LOWER_LIMIT   -1.2f
+#define PITCH_TARGET_UPPER_LIMIT   0.6f
+#define PITCH_TARGET_LOWER_LIMIT   -0.6f
 #define PITCH_GRAVITY_COMPENSATE   0.0f
 
 /******************************************************************************
  *                            PID parameters
  ******************************************************************************/
-#define LOWER_PITCH_OUTER_KP             40.0f
-#define LOWER_PITCH_OUTER_KI             1.0f
-#define LOWER_PITCH_OUTER_KD             80.0f
-#define LOWER_PITCH_OUTER_OUT_LIMIT      10.0f // 5
-#define LOWER_PITCH_OUTER_IOUT_LIMIT     0.5f
-#define LOWER_PITCH_INNER_KP             0.65f
-#define LOWER_PITCH_INNER_KI             0.005f
-#define LOWER_PITCH_INNER_KD             0.0f
+#define LOWER_PITCH_OUTER_KP             42.0f
+#define LOWER_PITCH_OUTER_KI             0.5f
+#define LOWER_PITCH_OUTER_KD             0.0f
+#define LOWER_PITCH_OUTER_OUT_LIMIT      11.0f // 11
+#define LOWER_PITCH_OUTER_IOUT_LIMIT     1.0f
+#define LOWER_PITCH_INNER_KP             0.85f
+#define LOWER_PITCH_INNER_KI             0.0f
+#define LOWER_PITCH_INNER_KD             0.08f
 #define LOWER_PITCH_INNER_OUT_LIMIT      10.0f
 #define LOWER_PITCH_INNER_IOUT_LIMIT     0.5f
-#define LOWER_PITCH_INNER_LOWPASS_FILTER 0.8f
+#define LOWER_PITCH_INNER_LOWPASS_FILTER 0.9f
 
 #define UPPER_PITCH_OUTER_KP             40.0f
-#define UPPER_PITCH_OUTER_KI             1.0f
+#define UPPER_PITCH_OUTER_KI             1.2f
 #define UPPER_PITCH_OUTER_KD             80.0f
 #define UPPER_PITCH_OUTER_OUT_LIMIT      10.0f // 5
 #define UPPER_PITCH_OUTER_IOUT_LIMIT     0.5f
-#define UPPER_PITCH_INNER_KP             0.65f
-#define UPPER_PITCH_INNER_KI             0.005f
-#define UPPER_PITCH_INNER_KD             0.0f
+#define UPPER_PITCH_INNER_KP             0.80f
+#define UPPER_PITCH_INNER_KI             0.00f
+#define UPPER_PITCH_INNER_KD             0.05f
 #define UPPER_PITCH_INNER_OUT_LIMIT      10.0f
 #define UPPER_PITCH_INNER_IOUT_LIMIT     0.5f
-#define UPPER_PITCH_INNER_LOWPASS_FILTER 0.8f
+#define UPPER_PITCH_INNER_LOWPASS_FILTER 0.9f
 
-#define FRICTION_KP                      700.0f
-#define FRICTION_KI                      0.2f
+#define FRICTION_KP                      380.0f
+#define FRICTION_KI                      0.0f
 #define FRICTION_KD                      0.0f
-#define FRICTION_OUT_LIMIT               16384.0f
+#define FRICTION_OUT_LIMIT               15000.0f
 #define FRICTION_IOUT_LIMIT              2000.0f
-#define FRICTION_TARGET_ANGULAR_VELOCITY 390.0f
+#define FRICTION_TARGET_ANGULAR_VELOCITY 640.0f
 
-#define FEEDER_KP                  700.0f
-#define FEEDER_KI                  0.2f
-#define FEEDER_KD                  0.0f
-#define FEEDER_OUT_LIMIT           10000.0f
-#define FEEDER_IOUT_LIMIT          2000.0f
-#define FEEDER_BULLET_SLOT_COUNT   8.0f
-#define FEEDER_BULLET_FREQ_HZ      8.0f
-#define FEEDER_TARGET_DIRECTION    1.0f
+#define FEEDER_KP                        6500.0f
+#define FEEDER_KI                        0.2f
+#define FEEDER_KD                        0.0f
+#define FEEDER_OUT_LIMIT                 10000.0f
+#define FEEDER_IOUT_LIMIT                2000.0f
+#define FEEDER_BULLET_SLOT_COUNT         8.0f
+#define FEEDER_BULLET_FREQ_HZ            20.0f
+#define FEEDER_TARGET_DIRECTION          1.0f
 
 /******************************************************************************
  *                            IMU parameters

@@ -24,7 +24,7 @@ extern SimplePID::PIDParam imuTempPIDParam;
 extern SimplePID imuTempPID;
 extern Gimbal gimbal;
 
-static Vofa<16> vofa;
+static Vofa<37> vofa;
 
 static void applySimplePidParam(SimplePID &pid, SimplePID::PIDParam &param)
 {
@@ -200,8 +200,8 @@ static void registerParameterListeners()
         applyFeederPidParam();
     });
     vofa.AddParameterListener("feeder_bullet_freq_hz", [](fp32 *newValue) {
-        UBaseType_t irqState     = taskENTER_CRITICAL_FROM_ISR();
-        feederBulletFrequencyHz  = *newValue > 0.0f ? *newValue : 0.0f;
+        UBaseType_t irqState    = taskENTER_CRITICAL_FROM_ISR();
+        feederBulletFrequencyHz = *newValue > 0.0f ? *newValue : 0.0f;
         taskEXIT_CRITICAL_FROM_ISR(irqState);
     });
 
@@ -228,16 +228,26 @@ static void registerParameterListeners()
 
 static void writeGimbalWaveData()
 {
-    vofa.writeData(gimbal.m_lowerPitchMotor->getCurrentAngle());
-    vofa.writeData(gimbal.m_upperPitchMotor->getCurrentAngle());
-    vofa.writeData(gimbal.m_pitchTargetAngle);
-    vofa.writeData(gimbal.m_eulerAngle.y);
-    vofa.writeData(gimbal.m_lowerPitchMotor->getCurrentAngularVelocity());
-    vofa.writeData(gimbal.m_upperPitchMotor->getCurrentAngularVelocity());
+    // vofa.writeData(gimbal.m_lowerPitchMotor->getCurrentAngle());
+    // vofa.writeData(gimbal.m_upperPitchMotor->getCurrentAngle());
+    // vofa.writeData(gimbal.m_pitchTargetAngle);
+    // vofa.writeData(gimbal.m_eulerAngle.y);
+    // vofa.writeData(gimbal.m_lowerPitchMotor->getCurrentAngularVelocity());
+    // vofa.writeData(gimbal.m_upperPitchMotor->getCurrentAngularVelocity());
     vofa.writeData(gimbal.m_leftFrictionMotor->getCurrentAngularVelocity() * 60.0f / (2.0f * M_PI));
     vofa.writeData(gimbal.m_rightFrictionMotor->getCurrentAngularVelocity() * 60.0f / (2.0f * M_PI));
     vofa.writeData(gimbal.m_feederMotor->getCurrentAngularVelocity() * 60.0f / (2.0f * M_PI));
     vofa.writeData(feederBulletFrequencyHz);
+    vofa.writeData(leftFrictionPID.pidGetData().output);
+    vofa.writeData(rightFrictionPID.pidGetData().output);
+    vofa.writeData(feederPID.pidGetData().output);
+    vofa.writeData(gimbal.m_leftFrictionMotor->isMotorConected() ? 1.0f : 0.0f);
+    vofa.writeData(gimbal.m_rightFrictionMotor->isMotorConected() ? 1.0f : 0.0f);
+    vofa.writeData(gimbal.m_feederMotor->isMotorConected() ? 1.0f : 0.0f);
+    vofa.writeData(static_cast<fp32>(gimbal.m_lastDjiCan200TxStatus));
+    vofa.writeData(static_cast<fp32>(gimbal.m_lastLowerDmTxStatus));
+    vofa.writeData(static_cast<fp32>(gimbal.m_lastUpperDmTxStatus));
+    vofa.writeData(static_cast<fp32>(gimbal.m_lastDjiCanError));
 }
 
 extern "C" void vofa_task(void *argument)
