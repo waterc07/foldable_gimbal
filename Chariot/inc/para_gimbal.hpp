@@ -83,13 +83,13 @@
 #define FRICTION_IOUT_LIMIT              2000.0f
 #define FRICTION_TARGET_ANGULAR_VELOCITY 640.0f
 
-#define FEEDER_KP                        6500.0f
-#define FEEDER_KI                        0.2f
+#define FEEDER_KP                        7000.0f
+#define FEEDER_KI                        10.0f
 #define FEEDER_KD                        0.0f
 #define FEEDER_OUT_LIMIT                 10000.0f
 #define FEEDER_IOUT_LIMIT                2000.0f
 #define FEEDER_BULLET_SLOT_COUNT         8.0f
-#define FEEDER_BULLET_FREQ_HZ            20.0f
+#define FEEDER_BULLET_FREQ_HZ            25.0f
 #define FEEDER_TARGET_DIRECTION          1.0f
 
 #define CAN_TX_FAILURE_LATCH_COUNT       3U
