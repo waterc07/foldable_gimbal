@@ -48,6 +48,18 @@ typedef struct
 {
     CAN_HandleTypeDef *hcan;
     CAN_Call_Back rxCallbackFunction;
+    volatile uint32_t lastError;
+    volatile uint32_t txFailureCount;
+    volatile uint32_t rxFailureCount;
+    volatile uint32_t recoveryCount;
+    volatile uint32_t txFrameCount;
+    volatile uint32_t rxFrameCount;
+    volatile uint32_t txMailboxFullCount;
+    volatile uint32_t rxFifoFullCount;
+    volatile uint32_t rxFifoOverrunCount;
+    volatile uint32_t rxFifoPeakFillLevel;
+    volatile uint8_t isInitialized;
+    volatile uint8_t busOffObserved;
 } CAN_Manage_Object_t;
 
 /* Exported constants --------------------------------------------------------*/
@@ -57,7 +69,11 @@ extern CAN_Manage_Object_t s_can_manage_objects[2]; // CAN管理对象
 /* Exported macro ------------------------------------------------------------*/
 
 /* Exported functions prototypes ---------------------------------------------*/
-void CAN_Init(CAN_HandleTypeDef *hcan, CAN_Call_Back rxCallbackFunction);
+HAL_StatusTypeDef CAN_Init(CAN_HandleTypeDef *hcan, CAN_Call_Back rxCallbackFunction);
+HAL_StatusTypeDef CAN_Service(CAN_HandleTypeDef *hcan);
+bool_t CAN_Is_Ready(CAN_HandleTypeDef *hcan);
+const CAN_Manage_Object_t *CAN_Get_Stats(CAN_HandleTypeDef *hcan);
+HAL_StatusTypeDef CAN_Abort_Pending_Tx(CAN_HandleTypeDef *hcan);
 HAL_StatusTypeDef CAN_Send_Data(CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *pTxHeader, uint8_t *pTxData);
 
 /* Defines -----------------------------------------------------------*/

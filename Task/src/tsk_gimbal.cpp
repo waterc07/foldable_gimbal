@@ -67,6 +67,17 @@ fp32 feederBulletFrequencyHz = FEEDER_BULLET_FREQ_HZ;
 /******************************************************************************
  *                            Motors
  ******************************************************************************/
+static_assert(LEFT_FRICTION_M3508_ID >= 1U && LEFT_FRICTION_M3508_ID <= 4U,
+              "DJI 0x200 combined frame supports motor IDs 1..4 only");
+static_assert(RIGHT_FRICTION_M3508_ID >= 1U && RIGHT_FRICTION_M3508_ID <= 4U,
+              "DJI 0x200 combined frame supports motor IDs 1..4 only");
+static_assert(FEEDER_M2006_ID >= 1U && FEEDER_M2006_ID <= 4U,
+              "DJI 0x200 combined frame supports motor IDs 1..4 only");
+static_assert(LEFT_FRICTION_M3508_ID != RIGHT_FRICTION_M3508_ID &&
+                  LEFT_FRICTION_M3508_ID != FEEDER_M2006_ID &&
+                  RIGHT_FRICTION_M3508_ID != FEEDER_M2006_ID,
+              "DJI motors sharing CAN 0x200 must use unique IDs");
+
 MotorDM4310 lowerPitchMotor(LOWER_PITCH_DM4310_CAN_ID,
                             LOWER_PITCH_DM4310_MASTER_ID,
                             3.141593f,
@@ -138,8 +149,8 @@ Gimbal gimbal(&lowerPitchMotor,
 
 extern "C" void gimbal_task(void *argument)
 {
-    TickType_t taskLastWakeTime = xTaskGetTickCount();
     gimbal.init();
+    TickType_t taskLastWakeTime = xTaskGetTickCount();
 
     while (1) {
         gimbal.controlLoop();

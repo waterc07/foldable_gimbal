@@ -248,6 +248,19 @@ static void writeGimbalWaveData()
     vofa.writeData(static_cast<fp32>(gimbal.m_lastLowerDmTxStatus));
     vofa.writeData(static_cast<fp32>(gimbal.m_lastUpperDmTxStatus));
     vofa.writeData(static_cast<fp32>(gimbal.m_lastDjiCanError));
+    vofa.writeData(gimbal.m_isCanHealthy ? 1.0f : 0.0f);
+    vofa.writeData(gimbal.m_canFaultLatched ? 1.0f : 0.0f);
+    vofa.writeData(static_cast<fp32>(gimbal.m_canTxFailureStreak));
+    vofa.writeData(static_cast<fp32>(gimbal.m_canRxFramesPerSecond));
+    vofa.writeData(static_cast<fp32>(gimbal.m_canTxFramesPerSecond));
+    vofa.writeData(static_cast<fp32>(gimbal.m_canEstimatedLoadPermille) / 10.0f);
+    vofa.writeData(gimbal.m_isCanLoadHigh ? 1.0f : 0.0f);
+    vofa.writeData(static_cast<fp32>(gimbal.m_canRxFifoFullCount));
+    vofa.writeData(static_cast<fp32>(gimbal.m_canRxFifoOverrunCount));
+    vofa.writeData(static_cast<fp32>(gimbal.m_canRxFifoPeakFillLevel));
+    vofa.writeData(static_cast<fp32>(gimbal.m_canTxMailboxFullCount));
+    vofa.writeData(static_cast<fp32>(gimbal.m_canTransmitErrorCounter));
+    vofa.writeData(static_cast<fp32>(gimbal.m_canReceiveErrorCounter));
 }
 
 extern "C" void vofa_task(void *argument)

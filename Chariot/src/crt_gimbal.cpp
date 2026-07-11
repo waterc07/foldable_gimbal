@@ -66,7 +66,8 @@ Gimbal::Gimbal(MotorDM4310 *lowerPitchMotor,
 void Gimbal::init()
 {
     DWT_Init();
-    CAN_Init(&hcan1, can1RxCallback);
+    m_isCanHealthy    = CAN_Init(&hcan1, can1RxCallback) == HAL_OK;
+    m_canFaultLatched = !m_isCanHealthy;
     UART_Init(&huart3, dr16RxCallback, 36);
     m_imu->init();
     m_isInitComplete = true;
@@ -76,7 +77,12 @@ void Gimbal::controlLoop()
 {
     if (!m_isInitComplete) return;
 
+    m_isCanHealthy = CAN_Service(&FRICTION_M3508_CAN_HANDLE) == HAL_OK;
+    if (!m_isCanHealthy) latchCanFault();
+    updateCanLoadMonitor();
+
     modeSelect();
+    if (m_canFaultLatched) forceCanSafeState();
     handleModeTransition();
     targetOrientationPlan();
     pitchControl();
@@ -303,21 +309,26 @@ void Gimbal::deployPitchControl()
 
 void Gimbal::frictionControl()
 {
-    if (m_gimbalMode != DEPLOY_CONTROL || !m_isDeployPitchReady || !m_frictionState) {
+    const bool frictionMotorsConnected = m_leftFrictionMotor->isMotorConected() &&
+                                         m_rightFrictionMotor->isMotorConected();
+    if (m_gimbalMode != DEPLOY_CONTROL || !m_isDeployPitchReady || !m_frictionState ||
+        !frictionMotorsConnected) {
         m_leftFrictionMotor->openloopControl(0.0f);
         m_rightFrictionMotor->openloopControl(0.0f);
         m_feederMotor->openloopControl(0.0f);
         m_feederState = false;
+        if (!frictionMotorsConnected) m_frictionState = false;
         return;
     }
 
     m_leftFrictionMotor->angularVelocityClosedloopControl(-FRICTION_TARGET_ANGULAR_VELOCITY);
     m_rightFrictionMotor->angularVelocityClosedloopControl(FRICTION_TARGET_ANGULAR_VELOCITY);
 
-    if (m_feederState) {
+    if (m_feederState && m_feederMotor->isMotorConected()) {
         m_feederMotor->angularVelocityClosedloopControl(feederTargetAngularVelocity());
     } else {
         m_feederMotor->openloopControl(0.0f);
+        m_feederState = false;
     }
 }
 
@@ -325,32 +336,126 @@ void Gimbal::transmitGimbalMotorData()
 {
     static bool transmitUpperPitchThisCycle = false;
 
-    MotorGM6020 mergedDjiMotor           = *m_leftFrictionMotor + *m_rightFrictionMotor + *m_feederMotor;
-    const uint8_t *mergedDjiControlData  = mergedDjiMotor.getMotorControlData();
-    memcpy(m_frictionFeederControlData, mergedDjiControlData, sizeof(m_frictionFeederControlData));
+    memset(m_frictionFeederControlData, 0, sizeof(m_frictionFeederControlData));
+    mergeDjiMotorControlData(m_leftFrictionMotor);
+    mergeDjiMotorControlData(m_rightFrictionMotor);
+    mergeDjiMotorControlData(m_feederMotor);
 
     m_lastDjiCanTxFreeLevelBefore        = HAL_CAN_GetTxMailboxesFreeLevel(&FRICTION_M3508_CAN_HANDLE);
     const HAL_StatusTypeDef djiTxStatus  = CAN_Send_Data(&FRICTION_M3508_CAN_HANDLE,
                                                          const_cast<CAN_TxHeaderTypeDef *>(m_leftFrictionMotor->getMotorControlHeader()),
-                                                         const_cast<uint8_t *>(mergedDjiControlData));
+                                                         m_frictionFeederControlData);
     m_lastDjiCanTxFreeLevelAfter         = HAL_CAN_GetTxMailboxesFreeLevel(&FRICTION_M3508_CAN_HANDLE);
-    m_lastDjiCanError                    = HAL_CAN_GetError(&FRICTION_M3508_CAN_HANDLE);
     m_lastDjiTxStdId                     = m_leftFrictionMotor->getMotorControlMessageID();
     m_lastDjiCan200TxStatus              = static_cast<uint8_t>(djiTxStatus);
     m_lastDjiCan1ffTxStatus              = 0xFEU;
 
+    HAL_StatusTypeDef pitchTxStatus;
     if (transmitUpperPitchThisCycle) {
-        const HAL_StatusTypeDef txStatus = CAN_Send_Data(&PITCH_DM4310_CAN_HANDLE,
-                                                         const_cast<CAN_TxHeaderTypeDef *>(m_upperPitchMotor->getMotorControlHeader()),
-                                                         const_cast<uint8_t *>(m_upperPitchMotor->getMotorControlData()));
-        m_lastUpperDmTxStatus            = static_cast<uint8_t>(txStatus);
+        pitchTxStatus         = CAN_Send_Data(&PITCH_DM4310_CAN_HANDLE,
+                                              const_cast<CAN_TxHeaderTypeDef *>(m_upperPitchMotor->getMotorControlHeader()),
+                                              const_cast<uint8_t *>(m_upperPitchMotor->getMotorControlData()));
+        m_lastUpperDmTxStatus = static_cast<uint8_t>(pitchTxStatus);
     } else {
-        const HAL_StatusTypeDef txStatus = CAN_Send_Data(&PITCH_DM4310_CAN_HANDLE,
-                                                         const_cast<CAN_TxHeaderTypeDef *>(m_lowerPitchMotor->getMotorControlHeader()),
-                                                         const_cast<uint8_t *>(m_lowerPitchMotor->getMotorControlData()));
-        m_lastLowerDmTxStatus            = static_cast<uint8_t>(txStatus);
+        pitchTxStatus         = CAN_Send_Data(&PITCH_DM4310_CAN_HANDLE,
+                                              const_cast<CAN_TxHeaderTypeDef *>(m_lowerPitchMotor->getMotorControlHeader()),
+                                              const_cast<uint8_t *>(m_lowerPitchMotor->getMotorControlData()));
+        m_lastLowerDmTxStatus = static_cast<uint8_t>(pitchTxStatus);
     }
     transmitUpperPitchThisCycle = !transmitUpperPitchThisCycle;
+    m_lastDjiCanError = HAL_CAN_GetError(&FRICTION_M3508_CAN_HANDLE);
+    updateCanTxHealth(djiTxStatus == HAL_OK && pitchTxStatus == HAL_OK);
+}
+
+void Gimbal::mergeDjiMotorControlData(MotorGM6020 *motor)
+{
+    const uint8_t *motorData = motor->getMotorControlData();
+    if (motor->getMotorControlMessageID() != m_leftFrictionMotor->getMotorControlMessageID()) return;
+
+    const uint8_t motorId = motor->getDjiMotorID();
+    if (motorId < 1U || motorId > 4U) return;
+
+    const uint8_t offset = static_cast<uint8_t>((motorId - 1U) * 2U);
+    m_frictionFeederControlData[offset]     = motorData[offset];
+    m_frictionFeederControlData[offset + 1] = motorData[offset + 1];
+}
+
+void Gimbal::updateCanLoadMonitor()
+{
+    static uint32_t lastSampleTick   = HAL_GetTick();
+    static uint32_t lastRxFrameCount = 0U;
+    static uint32_t lastTxFrameCount = 0U;
+
+    const CAN_Manage_Object_t *stats = CAN_Get_Stats(&FRICTION_M3508_CAN_HANDLE);
+    if (stats == nullptr) return;
+
+    const uint32_t esr        = FRICTION_M3508_CAN_HANDLE.Instance->ESR;
+    m_canTransmitErrorCounter = static_cast<uint8_t>((esr & CAN_ESR_TEC) >> CAN_ESR_TEC_Pos);
+    m_canReceiveErrorCounter  = static_cast<uint8_t>((esr & CAN_ESR_REC) >> CAN_ESR_REC_Pos);
+    m_canRxFifoFullCount      = stats->rxFifoFullCount;
+    m_canRxFifoOverrunCount   = stats->rxFifoOverrunCount;
+    m_canRxFifoPeakFillLevel  = stats->rxFifoPeakFillLevel;
+    m_canTxMailboxFullCount   = stats->txMailboxFullCount;
+
+    const uint32_t now       = HAL_GetTick();
+    const uint32_t elapsedMs = now - lastSampleTick;
+    if (elapsedMs < 1000U) return;
+
+    const uint32_t rxFrames    = stats->rxFrameCount - lastRxFrameCount;
+    const uint32_t txFrames    = stats->txFrameCount - lastTxFrameCount;
+    const uint32_t totalFrames = rxFrames + txFrames;
+
+    m_canRxFramesPerSecond = static_cast<uint32_t>((static_cast<uint64_t>(rxFrames) * 1000U) / elapsedMs);
+    m_canTxFramesPerSecond = static_cast<uint32_t>((static_cast<uint64_t>(txFrames) * 1000U) / elapsedMs);
+    m_canEstimatedLoadPermille = static_cast<uint32_t>(
+        (static_cast<uint64_t>(totalFrames) * CAN_STD_DATA_FRAME_WORST_BITS * 1000000U) /
+        (static_cast<uint64_t>(CAN_BUS_BITRATE) * elapsedMs));
+    m_isCanLoadHigh = m_canEstimatedLoadPermille >= CAN_LOAD_WARNING_PERMILLE ||
+                      m_canRxFifoOverrunCount != 0U ||
+                      m_canTxMailboxFullCount != 0U;
+
+    lastRxFrameCount = stats->rxFrameCount;
+    lastTxFrameCount = stats->txFrameCount;
+    lastSampleTick   = now;
+}
+
+void Gimbal::forceCanSafeState()
+{
+    m_gimbalMode    = GIMBAL_NO_FORCE;
+    m_frictionState = false;
+    m_feederState   = false;
+}
+
+void Gimbal::latchCanFault()
+{
+    if (!m_canFaultLatched) CAN_Abort_Pending_Tx(&FRICTION_M3508_CAN_HANDLE);
+    m_canFaultLatched = true;
+    forceCanSafeState();
+}
+
+void Gimbal::updateCanTxHealth(bool txCycleSucceeded)
+{
+    if (txCycleSucceeded) {
+        m_canTxFailureStreak = 0U;
+        if (m_canFaultLatched && m_isCanHealthy) {
+            if (m_canTxRecoverySuccessStreak < CAN_TX_RECOVERY_SUCCESS_COUNT) {
+                m_canTxRecoverySuccessStreak++;
+            }
+            if (m_canTxRecoverySuccessStreak >= CAN_TX_RECOVERY_SUCCESS_COUNT) {
+                m_canFaultLatched            = false;
+                m_canTxRecoverySuccessStreak = 0U;
+            }
+        } else {
+            m_canTxRecoverySuccessStreak = 0U;
+        }
+        return;
+    }
+
+    m_canTxRecoverySuccessStreak = 0U;
+    if (m_canTxFailureStreak < 0xFFU) m_canTxFailureStreak++;
+    if (m_canTxFailureStreak >= CAN_TX_FAILURE_LATCH_COUNT) {
+        latchCanFault();
+    }
 }
 
 inline void Gimbal::setPitchAngle(const fp32 &targetAngle)

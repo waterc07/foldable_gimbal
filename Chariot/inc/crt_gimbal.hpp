@@ -60,6 +60,20 @@ public:
     uint32_t m_lastDjiCanError               = 0U;
     uint8_t m_lastLowerDmTxStatus            = 0xFFU;
     uint8_t m_lastUpperDmTxStatus            = 0xFFU;
+    uint8_t m_canTxFailureStreak             = 0U;
+    uint8_t m_canTxRecoverySuccessStreak     = 0U;
+    bool m_isCanHealthy                      = false;
+    bool m_canFaultLatched                   = false;
+    uint32_t m_canRxFramesPerSecond          = 0U;
+    uint32_t m_canTxFramesPerSecond          = 0U;
+    uint32_t m_canEstimatedLoadPermille      = 0U;
+    uint32_t m_canRxFifoFullCount            = 0U;
+    uint32_t m_canRxFifoOverrunCount         = 0U;
+    uint32_t m_canRxFifoPeakFillLevel        = 0U;
+    uint32_t m_canTxMailboxFullCount         = 0U;
+    uint8_t m_canTransmitErrorCounter        = 0U;
+    uint8_t m_canReceiveErrorCounter         = 0U;
+    bool m_isCanLoadHigh                     = false;
 
 public:
     Gimbal(MotorDM4310 *lowerPitchMotor,
@@ -89,6 +103,11 @@ private:
     void deployPitchControl();
     void frictionControl();
     void transmitGimbalMotorData();
+    void mergeDjiMotorControlData(MotorGM6020 *motor);
+    void forceCanSafeState();
+    void latchCanFault();
+    void updateCanTxHealth(bool txCycleSucceeded);
+    void updateCanLoadMonitor();
 
     inline void setPitchAngle(const fp32 &targetAngle);
     inline fp32 feederTargetAngularVelocity() const;

@@ -48,7 +48,7 @@ static CAN_TypeDef *const canInstances[2] = {
 };
 
 /* Function prototypes -----------------------------------------------*/
-static void can_all_pass_filter_init(CAN_HandleTypeDef *hcan);
+static HAL_StatusTypeDef can_all_pass_filter_init(CAN_HandleTypeDef *hcan);
 
 /* User code ---------------------------------------------------------*/
 
@@ -72,40 +72,140 @@ static CAN_Manage_Object_t *CAN_Get_Object(CAN_HandleTypeDef *hcan)
  * @param hcan CAN句柄
  * @param rxCallbackFunction 处理回调函数
  */
-void CAN_Init(CAN_HandleTypeDef *hcan, CAN_Call_Back rxCallbackFunction)
+HAL_StatusTypeDef CAN_Init(CAN_HandleTypeDef *hcan, CAN_Call_Back rxCallbackFunction)
 {
     // 找到对应的CAN管理对象并设置参数
     CAN_Manage_Object_t *can_obj = CAN_Get_Object(hcan);
-    if (can_obj == NULL) return;
+    if (can_obj == NULL) return HAL_ERROR;
 
     can_obj->hcan               = hcan;
     can_obj->rxCallbackFunction = rxCallbackFunction;
+    can_obj->lastError          = HAL_CAN_ERROR_NONE;
+    can_obj->isInitialized      = false;
+    can_obj->busOffObserved     = false;
 
-    // 初始化滤波器
-    can_all_pass_filter_init(hcan);
-
-    // 启动CAN
-    HAL_CAN_Start(hcan);
-    HAL_CAN_ActivateNotification(hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
-
-    // 确保队列只初始化一次
-    if (is_queue_initialized == false) {
-        canRxQueueHandle     = osMessageQueueNew(16, sizeof(can_rx_message_t), &canRxQueue_attributes);
+    // 队列模式必须在开启接收中断前完成创建；回调模式不创建冗余队列。
+    if (rxCallbackFunction == NULL && is_queue_initialized == false) {
+        canRxQueueHandle = osMessageQueueNew(16, sizeof(can_rx_message_t), &canRxQueue_attributes);
+        if (canRxQueueHandle == NULL) return HAL_ERROR;
         is_queue_initialized = true;
     }
+
+    if (can_all_pass_filter_init(hcan) != HAL_OK) return HAL_ERROR;
+
+    // 启动CAN
+    if (HAL_CAN_Start(hcan) != HAL_OK) return HAL_ERROR;
+    if (HAL_CAN_ActivateNotification(hcan,
+                                     CAN_IT_RX_FIFO0_MSG_PENDING |
+                                         CAN_IT_RX_FIFO0_FULL |
+                                         CAN_IT_RX_FIFO0_OVERRUN) != HAL_OK) {
+        HAL_CAN_Stop(hcan);
+        return HAL_ERROR;
+    }
+
+    can_obj->isInitialized = true;
+    return HAL_OK;
 }
 
 /**
- * @brief CAN发送消息
- * @param hcan CAN句柄
- * @param pTxHeader 发送帧头指针
- * @param pTxData 发送数据指针
- * @return halsatus
+ * @brief Poll CAN state and finish automatic bus-off recovery.
+ * @return HAL_OK when CAN is listening, HAL_BUSY while bus-off is active.
+ */
+HAL_StatusTypeDef CAN_Service(CAN_HandleTypeDef *hcan)
+{
+    CAN_Manage_Object_t *can_obj = CAN_Get_Object(hcan);
+    if (can_obj == NULL || can_obj->isInitialized == false) return HAL_ERROR;
+
+    if ((hcan->Instance->ESR & CAN_ESR_BOFF) != 0U) {
+        if (can_obj->busOffObserved == false) CAN_Abort_Pending_Tx(hcan);
+        can_obj->busOffObserved = true;
+        hcan->ErrorCode |= HAL_CAN_ERROR_BOF;
+        can_obj->lastError = hcan->ErrorCode;
+        return HAL_BUSY;
+    }
+
+    HAL_CAN_StateTypeDef state = HAL_CAN_GetState(hcan);
+    if (state == HAL_CAN_STATE_READY) {
+        if (HAL_CAN_Start(hcan) != HAL_OK) return HAL_ERROR;
+        if (HAL_CAN_ActivateNotification(hcan,
+                                         CAN_IT_RX_FIFO0_MSG_PENDING |
+                                             CAN_IT_RX_FIFO0_FULL |
+                                             CAN_IT_RX_FIFO0_OVERRUN) != HAL_OK)
+            return HAL_ERROR;
+        state = HAL_CAN_GetState(hcan);
+    }
+
+    if (state != HAL_CAN_STATE_LISTENING) {
+        can_obj->lastError = HAL_CAN_GetError(hcan);
+        return HAL_ERROR;
+    }
+
+    if (can_obj->busOffObserved) {
+        HAL_CAN_ResetError(hcan);
+        can_obj->busOffObserved = false;
+        can_obj->recoveryCount++;
+    }
+    can_obj->lastError = HAL_CAN_GetError(hcan);
+    return HAL_OK;
+}
+
+/**
+ * @brief Check whether CAN can currently accept transmit requests.
+ */
+bool_t CAN_Is_Ready(CAN_HandleTypeDef *hcan)
+{
+    CAN_Manage_Object_t *can_obj = CAN_Get_Object(hcan);
+    if (can_obj == NULL || can_obj->isInitialized == false) return false;
+    return HAL_CAN_GetState(hcan) == HAL_CAN_STATE_LISTENING &&
+           (hcan->Instance->ESR & CAN_ESR_BOFF) == 0U;
+}
+
+/**
+ * @brief Return read-only runtime counters for load and congestion diagnostics.
+ */
+const CAN_Manage_Object_t *CAN_Get_Stats(CAN_HandleTypeDef *hcan)
+{
+    return CAN_Get_Object(hcan);
+}
+
+/**
+ * @brief Drop all pending frames so stale actuator commands cannot survive a fault.
+ */
+HAL_StatusTypeDef CAN_Abort_Pending_Tx(CAN_HandleTypeDef *hcan)
+{
+    CAN_Manage_Object_t *can_obj = CAN_Get_Object(hcan);
+    if (can_obj == NULL || can_obj->isInitialized == false) return HAL_ERROR;
+    if (HAL_CAN_GetState(hcan) != HAL_CAN_STATE_LISTENING) return HAL_ERROR;
+    return HAL_CAN_AbortTxRequest(hcan, CAN_TX_MAILBOX0 | CAN_TX_MAILBOX1 | CAN_TX_MAILBOX2);
+}
+
+/**
+ * @brief Queue one CAN frame after checking controller and mailbox state.
  */
 HAL_StatusTypeDef CAN_Send_Data(CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *pTxHeader, uint8_t *pTxData)
 {
+    CAN_Manage_Object_t *can_obj = CAN_Get_Object(hcan);
+    if (can_obj == NULL || pTxHeader == NULL || pTxData == NULL) return HAL_ERROR;
+    if (!CAN_Is_Ready(hcan)) {
+        can_obj->txFailureCount++;
+        can_obj->lastError = HAL_CAN_GetError(hcan);
+        return HAL_BUSY;
+    }
+    if (HAL_CAN_GetTxMailboxesFreeLevel(hcan) == 0U) {
+        can_obj->txFailureCount++;
+        can_obj->txMailboxFullCount++;
+        return HAL_BUSY;
+    }
+
     uint32_t txMailbox = 0U;
-    return HAL_CAN_AddTxMessage(hcan, pTxHeader, pTxData, &txMailbox);
+    HAL_StatusTypeDef status = HAL_CAN_AddTxMessage(hcan, pTxHeader, pTxData, &txMailbox);
+    if (status != HAL_OK) {
+        can_obj->txFailureCount++;
+    } else {
+        can_obj->txFrameCount++;
+    }
+    can_obj->lastError = HAL_CAN_GetError(hcan);
+    return status;
 }
 
 /**
@@ -114,7 +214,7 @@ HAL_StatusTypeDef CAN_Send_Data(CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *pT
  * @param None
  * @retval None
  */
-static void can_all_pass_filter_init(CAN_HandleTypeDef *hcan)
+static HAL_StatusTypeDef can_all_pass_filter_init(CAN_HandleTypeDef *hcan)
 {
     CAN_FilterTypeDef can_filter_st    = {0}; // 全通过滤器
     can_filter_st.FilterMode           = CAN_FILTERMODE_IDMASK;
@@ -132,10 +232,10 @@ static void can_all_pass_filter_init(CAN_HandleTypeDef *hcan)
     } else if (hcan->Instance == CAN2) {
         can_filter_st.FilterBank = 14;
     } else {
-        return;
+        return HAL_ERROR;
     }
 
-    HAL_CAN_ConfigFilter(hcan, &can_filter_st);
+    return HAL_CAN_ConfigFilter(hcan, &can_filter_st);
 }
 
 /**
@@ -146,26 +246,60 @@ static void can_all_pass_filter_init(CAN_HandleTypeDef *hcan)
  */
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
+    CAN_Manage_Object_t *can_obj = CAN_Get_Object(hcan);
+    if (can_obj == NULL) return;
+
+    const uint32_t fifoFillLevel = HAL_CAN_GetRxFifoFillLevel(hcan, CAN_RX_FIFO0);
+    if (fifoFillLevel > can_obj->rxFifoPeakFillLevel) {
+        can_obj->rxFifoPeakFillLevel = fifoFillLevel;
+    }
+
     can_rx_message_t s_rx_msg;
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &s_rx_msg.header, s_rx_msg.data) == HAL_OK) {
+        can_obj->rxFrameCount++;
+        if (can_obj->rxCallbackFunction != NULL) {
+            can_obj->rxCallbackFunction(&s_rx_msg);
+            return;
+        }
 
-        // 1. 使用队列保存接收数据（保持原有功能）
+        // No callback was registered, so deliver through the shared queue.
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        if (canRxQueueHandle == NULL) {
+            can_obj->rxFailureCount++;
+            return;
+        }
         if (xQueueIsQueueFullFromISR(canRxQueueHandle)) // 队列满,移除最早的数据
         {
             can_rx_message_t s_dummy_msg;
             xQueueReceiveFromISR(canRxQueueHandle, &s_dummy_msg, &xHigherPriorityTaskWoken);
         }
-        // 写入新数据
-        xQueueSendToBackFromISR(canRxQueueHandle, &s_rx_msg, &xHigherPriorityTaskWoken);
-
-        // 2. 调用注册的回调函数（新增功能）
-        CAN_Manage_Object_t *can_obj = CAN_Get_Object(hcan);
-        if (can_obj != NULL && can_obj->rxCallbackFunction != NULL) {
-            can_obj->rxCallbackFunction(&s_rx_msg);
+        if (xQueueSendToBackFromISR(canRxQueueHandle, &s_rx_msg, &xHigherPriorityTaskWoken) != pdPASS) {
+            can_obj->rxFailureCount++;
         }
 
-        // 重新发起调度
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    } else {
+        can_obj->rxFailureCount++;
+    }
+}
+
+void HAL_CAN_RxFifo0FullCallback(CAN_HandleTypeDef *hcan)
+{
+    CAN_Manage_Object_t *can_obj = CAN_Get_Object(hcan);
+    if (can_obj == NULL) return;
+    can_obj->rxFifoFullCount++;
+    can_obj->rxFifoPeakFillLevel = 3U;
+}
+
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
+{
+    CAN_Manage_Object_t *can_obj = CAN_Get_Object(hcan);
+    if (can_obj == NULL) return;
+
+    const uint32_t error = HAL_CAN_GetError(hcan);
+    can_obj->lastError   = error;
+    if ((error & HAL_CAN_ERROR_RX_FOV0) != 0U) {
+        can_obj->rxFifoOverrunCount++;
+        can_obj->rxFailureCount++;
     }
 }

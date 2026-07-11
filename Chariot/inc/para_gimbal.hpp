@@ -92,6 +92,12 @@
 #define FEEDER_BULLET_FREQ_HZ            20.0f
 #define FEEDER_TARGET_DIRECTION          1.0f
 
+#define CAN_TX_FAILURE_LATCH_COUNT       3U
+#define CAN_TX_RECOVERY_SUCCESS_COUNT    10U
+#define CAN_BUS_BITRATE                  1000000U
+#define CAN_STD_DATA_FRAME_WORST_BITS    135U
+#define CAN_LOAD_WARNING_PERMILLE        750U
+
 /******************************************************************************
  *                            IMU parameters
  ******************************************************************************/
